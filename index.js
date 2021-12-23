@@ -1,33 +1,38 @@
-const R = require("request-promise-native");
-const cheerio = require("cheerio");
-const fs = require("fs");
-const path = require("path");
+const jsdom = require("jsdom");
+const fetch = require("node-fetch");
+const { writeFile, mkdir } = require("fs/promises");
+const { program } = require("commander");
+const packageJson = require("./package.json");
 
-const args = process.argv;
-const urlIndex = args.indexOf("--url");
-if (urlIndex == -1) {
-  console.log("Please pass --url");
-  process.exit(0);
+program.version(packageJson.version);
+program.option("-u, --url <url>", "URL for a wallpaper cave category");
+program.parse(process.argv);
+
+const options = program.opts();
+
+const { JSDOM } = jsdom;
+
+const url = options.url;
+
+async function start() {
+  await mkdir("wp", {
+    recursive: true,
+  });
+  const htmlData = await fetch(url).then((r) => r.text());
+  const {
+    window: { document },
+  } = new JSDOM(htmlData);
+
+  const imgs = document.querySelectorAll(".wimg");
+  const writePromises = [...imgs].map(async (img) => {
+    const imageSource = img.getAttribute("src");
+    console.log(imageSource);
+    const arrayBuffer = await fetch(
+      `https://wallpapercave.com${imageSource}`
+    ).then((res) => res.arrayBuffer());
+    return writeFile(`.${imageSource}`, Buffer.from(arrayBuffer));
+  });
+  await Promise.all(writePromises);
 }
-let url = args[urlIndex + 1];
 
-(async function() {
-  const $$ = await R({
-    url,
-    transform: function(body) {
-      return cheerio.load(body);
-    }
-  });
-  const hrefs = $$(".wpimg").each((index, a) => {
-    const url = $$(a).attr("src");
-    console.log(`dowloading ${url}`);
-    const x = `https://wallpapercave.com/${url}`;
-    // console.log(x);
-    const file = fs.createWriteStream(
-      path.resolve("./dist", path.basename(url))
-    );
-    R.get(x)
-      .pipe(file)
-      .on("finish", () => console.log(`downloaded ${url}`));
-  });
-})();
+start();
